@@ -1,4 +1,6 @@
 # QR Code Generator
+ LIVE DEMO -> **(https://iglebrantools.onrender.com)**
+ (NOTE: first instance will require 30sec or more on startup, ONLY if the service is not active for 15 minutes)
 
 A simple web application that generates QR codes from text or URLs. Built with Java Spring Boot and containerized with Docker.
 

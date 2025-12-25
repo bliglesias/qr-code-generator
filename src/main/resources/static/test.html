@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TBA Scanner</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 20px auto; }
+        #reader { width: 100%; }
+        button { padding: 10px 20px; margin: 5px; }
+        .scan-item { padding: 10px; border-bottom: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>TBA Scanner</h1>
+
+    <div id="reader"></div>
+    <button onclick="startScanner()">Start Camera</button>
+    <button onclick="stopScanner()">Stop Camera</button>
+
+    <h2>Recent Scans</h2>
+    <button onclick="loadScans()">Refresh</button>
+    <div id="scans"></div>
+
+    <script>
+        let html5QrCode;
+
+        function startScanner() {
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: 250 },
+                onScanSuccess
+            );
+        }
+
+        function stopScanner() {
+            if (html5QrCode) {
+                html5QrCode.stop();
+            }
+        }
+
+        async function onScanSuccess(decodedText) {
+            // Check if it's a TBA code
+            if (decodedText.match(/^TBA\d{12}$/)) {
+                await saveScan(decodedText);
+                await loadScans();
+            } else {
+                alert('Not a valid TBA code: ' + decodedText);
+            }
+        }
+
+        async function saveScan(tbaCode) {
+            await fetch('/api/scans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tbaCode })
+            });
+        }
+
+        async function loadScans() {
+            const response = await fetch('/api/scans');
+            const scans = await response.json();
+
+            const html = scans.map(scan => `
+                <div class="scan-item">
+                    <strong>${scan.tbaCode}</strong><br>
+                    <small>${new Date(scan.scannedAt).toLocaleString()}</small>
+                </div>
+            `).join('');
+
+            document.getElementById('scans').innerHTML = html || 'No scans yet';
+        }
+
+        // Load scans on page load
+        loadScans();
+    </script>
+</body>
+</html>

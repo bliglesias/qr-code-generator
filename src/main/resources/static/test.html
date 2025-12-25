@@ -1,52 +1,112 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>TBA Scanner</title>
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <title>TBA QR Generator</title>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
     <style>
         body { font-family: Arial; max-width: 800px; margin: 20px auto; }
-        #reader { width: 100%; }
+        video { width: 100%; max-width: 400px; }
+        canvas { display: none; }
         button { padding: 10px 20px; margin: 5px; }
-        .scan-item { padding: 10px; border-bottom: 1px solid #ccc; }
+        #qrDisplay { margin: 20px 0; text-align: center; }
+        #qrDisplay img { max-width: 300px; border: 2px solid #333; }
+        .status { padding: 10px; background: #f0f0f0; margin: 10px 0; }
     </style>
 </head>
 <body>
-    <h1>TBA Scanner</h1>
+    <h1>TBA QR Code Generator</h1>
+    <p>Point camera at TBA text on package label</p>
 
-    <div id="reader"></div>
-    <button onclick="startScanner()">Start Camera</button>
-    <button onclick="stopScanner()">Stop Camera</button>
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+
+    <div>
+        <button onclick="startCamera()">Start Camera</button>
+        <button onclick="captureAndRead()">Capture & Read TBA</button>
+        <button onclick="stopCamera()">Stop Camera</button>
+    </div>
+
+    <div class="status" id="status">Ready</div>
+
+    <div id="qrDisplay"></div>
 
     <h2>Recent Scans</h2>
     <button onclick="loadScans()">Refresh</button>
     <div id="scans"></div>
 
     <script>
-        let html5QrCode;
+        let stream;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
 
-        function startScanner() {
-            html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start(
-                { facingMode: "environment" },
-                { fps: 10, qrbox: 250 },
-                onScanSuccess
-            );
-        }
-
-        function stopScanner() {
-            if (html5QrCode) {
-                html5QrCode.stop();
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                document.getElementById('status').textContent = 'Camera active - point at TBA text';
+            } catch (err) {
+                document.getElementById('status').textContent = 'Camera error: ' + err.message;
             }
         }
 
-        async function onScanSuccess(decodedText) {
-            // Check if it's a TBA code
-            if (decodedText.match(/^TBA\d{12}$/)) {
-                await saveScan(decodedText);
-                await loadScans();
-            } else {
-                alert('Not a valid TBA code: ' + decodedText);
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                document.getElementById('status').textContent = 'Camera stopped';
             }
+        }
+
+        async function captureAndRead() {
+            document.getElementById('status').textContent = 'Reading text...';
+
+            // Capture frame
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+
+            // OCR
+            try {
+                const result = await Tesseract.recognize(canvas, 'eng', {
+                    logger: m => console.log(m)
+                });
+
+                const text = result.data.text;
+                console.log('OCR result:', text);
+
+                // Find TBA code in text
+                const tbaMatch = text.match(/TBA\d{12}/);
+
+                if (tbaMatch) {
+                    const tbaCode = tbaMatch[0];
+                    document.getElementById('status').textContent = 'Found: ' + tbaCode;
+
+                    // Save to database
+                    await saveScan(tbaCode);
+
+                    // Display as QR code
+                    displayQR(tbaCode);
+
+                    // Refresh scan list
+                    await loadScans();
+                } else {
+                    document.getElementById('status').textContent = 'No TBA code found. Try again.';
+                }
+            } catch (err) {
+                document.getElementById('status').textContent = 'OCR error: ' + err.message;
+            }
+        }
+
+        function displayQR(tbaCode) {
+            const qrUrl = `/api/qr/generate?text=${tbaCode}&size=300`;
+            document.getElementById('qrDisplay').innerHTML = `
+                <h3>${tbaCode}</h3>
+                <img src="${qrUrl}" alt="QR Code">
+                <p>Scan this QR code with your Zebra device</p>
+            `;
         }
 
         async function saveScan(tbaCode) {
@@ -62,7 +122,7 @@
             const scans = await response.json();
 
             const html = scans.map(scan => `
-                <div class="scan-item">
+                <div style="padding: 10px; border-bottom: 1px solid #ccc;">
                     <strong>${scan.tbaCode}</strong><br>
                     <small>${new Date(scan.scannedAt).toLocaleString()}</small>
                 </div>
@@ -71,7 +131,6 @@
             document.getElementById('scans').innerHTML = html || 'No scans yet';
         }
 
-        // Load scans on page load
         loadScans();
     </script>
 </body>

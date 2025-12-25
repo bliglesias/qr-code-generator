@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Code Generator</title>
+    <title>TBA QR Scanner</title>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
     <style>
         * {
             margin: 0;
@@ -15,9 +16,6 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             padding: 20px;
         }
 
@@ -26,8 +24,8 @@
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             padding: 40px;
-            max-width: 500px;
-            width: 100%;
+            max-width: 600px;
+            margin: 20px auto;
         }
 
         h1 {
@@ -43,29 +41,15 @@
             font-size: 14px;
         }
 
-        .input-group {
+        video {
+            width: 100%;
+            max-width: 100%;
+            border-radius: 12px;
             margin-bottom: 20px;
         }
 
-        label {
-            display: block;
-            color: #555;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        input[type="text"], input[type="number"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s;
-        }
-
-        input[type="text"]:focus, input[type="number"]:focus {
-            outline: none;
-            border-color: #667eea;
+        canvas {
+            display: none;
         }
 
         button {
@@ -79,6 +63,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 10px;
         }
 
         button:hover {
@@ -90,79 +75,168 @@
             transform: translateY(0);
         }
 
-        #qrCodeResult {
-            margin-top: 30px;
+        .status {
+            padding: 12px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            margin: 20px 0;
             text-align: center;
-            display: none;
+            font-weight: 600;
+            color: #555;
         }
 
-        #qrCodeResult.show {
-            display: block;
+        #qrDisplay {
+            margin: 30px 0;
+            text-align: center;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 12px;
         }
 
-        #qrCodeImage {
-            max-width: 100%;
+        #qrDisplay img {
+            max-width: 300px;
             border-radius: 12px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin: 10px 0;
         }
 
-        .success-message {
-            color: #4caf50;
-            font-weight: 600;
-            margin-bottom: 15px;
+        #qrDisplay h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .scan-item {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            text-align: left;
+        }
+
+        .scan-item strong {
+            color: #333;
+            font-size: 18px;
+        }
+
+        .scan-item small {
+            color: #888;
+        }
+
+        h2 {
+            color: #333;
+            margin: 30px 0 15px 0;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔲 QR Code Generator</h1>
-        <p class="subtitle">Enter text or a URL to generate a QR code</p>
+        <h1>📦 TBA QR Scanner</h1>
+        <p class="subtitle">Point camera at TBA text on damaged packages</p>
 
-        <div class="input-group">
-            <label for="qrText">Text or URL:</label>
-            <input type="text" id="qrText" placeholder="e.g., https://example.com or Hello World" value="Hello World">
-        </div>
+        <video id="video" autoplay></video>
+        <canvas id="canvas"></canvas>
 
-        <div class="input-group">
-            <label for="qrSize">Size (pixels):</label>
-            <input type="number" id="qrSize" value="300" min="100" max="1000">
-        </div>
+        <button onclick="startCamera()">📷 Start Camera</button>
+        <button onclick="captureAndRead()">🔍 Capture & Read TBA</button>
+        <button onclick="stopCamera()">⏹️ Stop Camera</button>
 
-        <button onclick="generateQR()">Generate QR Code</button>
+        <div class="status" id="status">Ready to scan</div>
 
-        <div id="qrCodeResult">
-            <p class="success-message">✓ QR Code Generated!</p>
-            <img id="qrCodeImage" alt="Generated QR Code">
-        </div>
+        <div id="qrDisplay"></div>
+
+        <h2>Recent Scans</h2>
+        <button onclick="loadScans()">🔄 Refresh Scans</button>
+        <div id="scans"></div>
     </div>
 
     <script>
-        function generateQR() {
-            const text = document.getElementById('qrText').value;
-            const size = document.getElementById('qrSize').value;
+        let stream;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
 
-            if (!text) {
-                alert('Please enter some text or a URL!');
-                return;
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                document.getElementById('status').textContent = '📷 Camera active - point at TBA text';
+            } catch (err) {
+                document.getElementById('status').textContent = '❌ Camera error: ' + err.message;
             }
-
-            // Build the API URL
-            const apiUrl = `/api/qr/generate?text=${encodeURIComponent(text)}&size=${size}`;
-
-            // Update the image source
-            const qrImage = document.getElementById('qrCodeImage');
-            qrImage.src = apiUrl;
-
-            // Show the result
-            document.getElementById('qrCodeResult').classList.add('show');
         }
 
-        // Allow Enter key to generate
-        document.getElementById('qrText').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                generateQR();
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                document.getElementById('status').textContent = '⏹️ Camera stopped';
             }
-        });
+        }
+
+        async function captureAndRead() {
+            document.getElementById('status').textContent = '⏳ Reading text... (this may take 10-30 seconds)';
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+
+            try {
+                const result = await Tesseract.recognize(canvas, 'eng', {
+                    logger: m => console.log(m)
+                });
+
+                const text = result.data.text;
+                console.log('OCR result:', text);
+
+                const tbaMatch = text.match(/TBA\d{12}/);
+
+                if (tbaMatch) {
+                    const tbaCode = tbaMatch[0];
+                    document.getElementById('status').textContent = '✅ Found: ' + tbaCode;
+
+                    await saveScan(tbaCode);
+                    displayQR(tbaCode);
+                    await loadScans();
+                } else {
+                    document.getElementById('status').textContent = '❌ No TBA code found. Try again with better lighting.';
+                }
+            } catch (err) {
+                document.getElementById('status').textContent = '❌ OCR error: ' + err.message;
+            }
+        }
+
+        function displayQR(tbaCode) {
+            const qrUrl = `/api/qr/generate?text=${tbaCode}&size=300`;
+            document.getElementById('qrDisplay').innerHTML = `
+                <h3>${tbaCode}</h3>
+                <img src="${qrUrl}" alt="QR Code">
+                <p>📱 Scan this QR code with your Zebra device</p>
+            `;
+        }
+
+        async function saveScan(tbaCode) {
+            await fetch('/api/scans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tbaCode })
+            });
+        }
+
+        async function loadScans() {
+            const response = await fetch('/api/scans');
+            const scans = await response.json();
+
+            const html = scans.map(scan => `
+                <div class="scan-item">
+                    <strong>${scan.tbaCode}</strong><br>
+                    <small>🕐 ${new Date(scan.scannedAt).toLocaleString()}</small>
+                </div>
+            `).join('');
+
+            document.getElementById('scans').innerHTML = html || '<p style="text-align:center; color:#888;">No scans yet</p>';
+        }
+
+        loadScans();
     </script>
 </body>
 </html>
